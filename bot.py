@@ -1,10 +1,10 @@
-# bot.py — FINAL BUILD (Render + Proxy Support + Auto-Install)
 import os
 import re
 import asyncio
 import logging
 import threading
 import subprocess
+import time
 from pathlib import Path
 from flask import Flask
 from telegram import Update
@@ -18,9 +18,8 @@ from playwright.async_api import async_playwright
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_NEW_TOKEN_HERE")
 ALLOWED_USER_IDS = [8964939517]
 
-# YAHAN APNA PROXY DAAL (Agar Render pe block hai toh)
-# Format: "http://username:password@ip_address:port" ya "http://ip_address:port"
-PROXY_URL = os.environ.get("PROXY_URL", "") 
+# YAHAN APNA PROXY DAAL (Format: http://ip:port)
+PROXY_SERVER = "http://127.0.0.1:8080"
 # ==============================================
 
 ALLOWED = set(ALLOWED_USER_IDS)
@@ -33,12 +32,12 @@ log = logging.getLogger("aadhaar-bot")
 ASK_NUMBER, SOLVE_CAPTCHA, ASK_OTP = range(3)
 SESSIONS = {}
 
-# --- Dummy Flask Server for Render Port Bind ---
+# --- Flask Server (Render Port Fix) ---
 web_app = Flask(__name__)
 @web_app.route('/')
 def health():
     return "Bot is running live!"
-# -----------------------------------------------
+# ---------------------------------------
 
 def allowed(update: Update) -> bool:
     return update.effective_user is not None and update.effective_user.id in ALLOWED
@@ -76,7 +75,7 @@ async def got_number(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     SESSIONS[update.effective_user.id] = {"query": num, "type": input_type}
     
-    await update.message.reply_text("Browser khol raha hoon. Screenshot bhejunga, captcha solve karke batao v9.")
+    await update.message.reply_text("Browser khol raha hoon. Screenshot bhejunga, captcha solve karke batao.")
     asyncio.create_task(open_browser(update.effective_user.id, ctx))
     return SOLVE_CAPTCHA
 
@@ -85,22 +84,18 @@ async def open_browser(user_id: int, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         p_ctx = await async_playwright().start()
         
-        launch_args = {
-            "headless": True,
-            "args": [
-                "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
-                "--disable-gpu", "--single-process", "--no-zygote",
-                "--disable-blink-features=AutomationControlled"
-            ]
-        }
-
-        # Agar Proxy URL set hai toh use karo (Cloudflare bypass)
-        if PROXY_URL:
-            log.info(f"Using Proxy: {PROXY_URL}")
-            launch_args["proxy"] = {"server": PROXY_URL}
+        # Proxy launch args
+        launch_args = [
+            "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+            "--disable-gpu", "--single-process", "--no-zygote",
+            "--disable-blink-features=AutomationControlled"
+        ]
         
-        browser = await p_ctx.chromium.launch(**launch_args)
-        
+        browser = await p_ctx.chromium.launch(
+            headless=True,
+            proxy={"server": PROXY_SERVER} if PROXY_SERVER else None,
+            args=launch_args
+        )
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             viewport={"width": 1366, "height": 768}
@@ -110,16 +105,12 @@ async def open_browser(user_id: int, ctx: ContextTypes.DEFAULT_TYPE):
         page = await context.new_page()
 
         log.info("Navigating to UIDAI...")
-        
-        # Cloudflare ko time do load hone ka
         try:
             await page.goto("https://myaadhaar.uidai.gov.in", wait_until="domcontentloaded", timeout=90000)
         except Exception as e:
-            log.warning(f"Timeout but continuing: {e}")
+            log.warning(f"Timeout/Goto Error: {e}")
             
-        # 20 second wait karo taaki Cloudflare check pass ho jaye
-        log.info("Waiting for page to render (Cloudflare bypass)...")
-        await asyncio.sleep(20) 
+        await asyncio.sleep(5)
 
         if sess["type"] == "mobile":
             try: await page.get_by_role("link", name=re.compile("Mobile", re.I)).first.click(timeout=5000)
@@ -246,14 +237,19 @@ def main():
     def run_server():
         port = int(os.environ.get("PORT", 10000))
         web_app.run(host="0.0.0.0", port=port)
+    
     threading.Thread(target=run_server, daemon=True).start()
-    log.info("Flask dummy server started.")
+    log.info("Flask dummy server started. Port is open.")
 
     try:
-        log.info("Auto-installing Playwright Chromium...")
-        subprocess.run(["playwright", "install", "chromium"], capture_output=True)
+        log.info("Checking Playwright browser installation...")
+        result = subprocess.run(["playwright", "install", "chromium"], capture_output=True, text=True)
+        if result.returncode == 0:
+            log.info("Playwright Chromium successfully verified/installed!")
+        else:
+            log.error(f"Playwright install failed: {result.stderr}")
     except Exception as e:
-        log.error(f"Playwright install error: {e}")
+        log.error(f"Could not run playwright install: {e}")
 
     bot_app = Application.builder().token(BOT_TOKEN).build()
     conv = ConversationHandler(
