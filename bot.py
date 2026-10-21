@@ -1,9 +1,11 @@
-# bot.py — Cloud Version (Standard Playwright)
+# bot.py — Final Render Version (Flask Server + Playwright)
 import os
 import re
 import asyncio
 import logging
+import threading
 from pathlib import Path
+from flask import Flask
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -25,6 +27,13 @@ log = logging.getLogger("aadhaar-bot")
 
 ASK_NUMBER, SOLVE_CAPTCHA, ASK_OTP = range(3)
 SESSIONS = {}
+
+# --- Dummy Flask Server (Render Port Fix) ---
+web_app = Flask(__name__)
+@web_app.route('/')
+def health():
+    return "Bot is running live!"
+# --------------------------------------------
 
 def allowed(update: Update) -> bool:
     return update.effective_user is not None and update.effective_user.id in ALLOWED
@@ -71,7 +80,7 @@ async def open_browser(user_id: int, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         p_ctx = await async_playwright().start()
         
-        # RAM bachane ke liye flags
+        # Cloud pe Single-process aur No-sandbox zaroori hai
         browser = await p_ctx.chromium.launch(
             headless=True,
             args=[
@@ -79,7 +88,7 @@ async def open_browser(user_id: int, ctx: ContextTypes.DEFAULT_TYPE):
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
-                "--single-process" # Cloud RAM bachane ke liye
+                "--single-process"
             ]
         )
         context = await browser.new_context(
@@ -212,7 +221,15 @@ async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    # Start dummy server for Render
+    def run_server():
+        port = int(os.environ.get("PORT", 10000))
+        web_app.run(host="0.0.0.0", port=port)
+    
+    threading.Thread(target=run_server, daemon=True).start()
+    log.info("Dummy web server started on port.")
+
+    bot_app = Application.builder().token(BOT_TOKEN).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -222,9 +239,9 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
-    app.add_handler(conv)
+    bot_app.add_handler(conv)
     log.info("Bot running on Cloud!")
-    app.run_polling()
+    bot_app.run_polling()
 
 if __name__ == "__main__":
     main()
