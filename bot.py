@@ -1,4 +1,4 @@
-# bot.py — The Final Build (Cloudflare Bypass + Flask + Screenshot)
+# bot.py — THE FINAL BUILD (Render + Cloudflare Bypass + Auto Captcha SS)
 import os
 import re
 import asyncio
@@ -29,12 +29,12 @@ log = logging.getLogger("aadhaar-bot")
 ASK_NUMBER, SOLVE_CAPTCHA, ASK_OTP = range(3)
 SESSIONS = {}
 
-# --- Dummy Flask Server (Render Port Fix) ---
+# --- Dummy Flask Server for Render Port Bind ---
 web_app = Flask(__name__)
 @web_app.route('/')
 def health():
     return "Bot is running live!"
-# --------------------------------------------
+# -----------------------------------------------
 
 def allowed(update: Update) -> bool:
     return update.effective_user is not None and update.effective_user.id in ALLOWED
@@ -72,7 +72,7 @@ async def got_number(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     SESSIONS[update.effective_user.id] = {"query": num, "type": input_type}
     
-    await update.message.reply_text("Browser khol raha hoon. Screenshot bhejunga, captcha solve karke batao v6.")
+    await update.message.reply_text("Browser khol raha hoon. Screenshot bhejunga, captcha solve karke batao.")
     asyncio.create_task(open_browser(update.effective_user.id, ctx))
     return SOLVE_CAPTCHA
 
@@ -81,7 +81,7 @@ async def open_browser(user_id: int, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         p_ctx = await async_playwright().start()
         
-        # Cloudflare Bypass Flags
+        # Render Cloud Flags (No sandbox, single process, no zygote)
         browser = await p_ctx.chromium.launch(
             headless=True,
             args=[
@@ -90,6 +90,8 @@ async def open_browser(user_id: int, ctx: ContextTypes.DEFAULT_TYPE):
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
                 "--single-process",
+                "--no-zygote",
+                "--disable-accelerated-2d-canvas",
                 "--disable-blink-features=AutomationControlled"
             ]
         )
@@ -98,14 +100,20 @@ async def open_browser(user_id: int, ctx: ContextTypes.DEFAULT_TYPE):
             viewport={"width": 1366, "height": 768}
         )
         
-        # Stealth Script to hide bot
+        # Stealth Script to hide webdriver
         await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         page = await context.new_page()
 
         log.info("Navigating to UIDAI...")
-        # Timeout badhaya, domcontentloaded use kiya
-        await page.goto("https://myaadhaar.uidai.gov.in", wait_until="domcontentloaded", timeout=90000)
-        await asyncio.sleep(5) 
+        
+        # CLOUDFLARE FIX: wait_until="commit" and try-except
+        try:
+            await page.goto("https://myaadhaar.uidai.gov.in", wait_until="commit", timeout=60000)
+        except Exception as e:
+            log.warning(f"Timeout at 'commit', but continuing to screenshot: {e}")
+            
+        # Wait for rendering
+        await asyncio.sleep(10) 
 
         if sess["type"] == "mobile":
             try: await page.get_by_role("link", name=re.compile("Mobile", re.I)).first.click(timeout=5000)
@@ -229,7 +237,7 @@ async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 def main():
-    # 1. Flask Server
+    # 1. Flask server start
     def run_server():
         port = int(os.environ.get("PORT", 10000))
         web_app.run(host="0.0.0.0", port=port)
@@ -248,7 +256,7 @@ def main():
     except Exception as e:
         log.error(f"Could not run playwright install: {e}")
 
-    # 3. Telegram Bot
+    # 3. Bot Start
     bot_app = Application.builder().token(BOT_TOKEN).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
