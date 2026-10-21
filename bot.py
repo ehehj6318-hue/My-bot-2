@@ -1,9 +1,11 @@
-# bot.py — Final Render Version (Flask Server + Playwright)
+# bot.py — Final Render HACK (Auto-Install Chromium + Flask)
 import os
 import re
 import asyncio
 import logging
 import threading
+import subprocess
+import sys
 from pathlib import Path
 from flask import Flask
 from telegram import Update
@@ -80,7 +82,7 @@ async def open_browser(user_id: int, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         p_ctx = await async_playwright().start()
         
-        # Cloud pe Single-process aur No-sandbox zaroori hai
+        # Cloud flags
         browser = await p_ctx.chromium.launch(
             headless=True,
             args=[
@@ -221,14 +223,27 @@ async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 def main():
-    # Start dummy server for Render
+    # 1. Start Flask server FIRST (Render ko port dikhane ke liye)
     def run_server():
         port = int(os.environ.get("PORT", 10000))
         web_app.run(host="0.0.0.0", port=port)
     
     threading.Thread(target=run_server, daemon=True).start()
-    log.info("Dummy web server started on port.")
+    log.info("Flask dummy server started. Port is open.")
 
+    # 2. MAGIC HACK: Khud hi Chromium install karo
+    try:
+        log.info("Checking Playwright browser installation...")
+        # Check if playwright command exists and install chromium
+        result = subprocess.run(["playwright", "install", "chromium"], capture_output=True, text=True)
+        if result.returncode == 0:
+            log.info("Playwright Chromium successfully verified/installed!")
+        else:
+            log.error(f"Playwright install failed: {result.stderr}")
+    except Exception as e:
+        log.error(f"Could not run playwright install: {e}")
+
+    # 3. Start Telegram Bot
     bot_app = Application.builder().token(BOT_TOKEN).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -240,7 +255,7 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
     bot_app.add_handler(conv)
-    log.info("Bot running on Cloud!")
+    log.info("Bot is now polling Telegram!")
     bot_app.run_polling()
 
 if __name__ == "__main__":
