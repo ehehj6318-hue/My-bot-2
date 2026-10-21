@@ -1,11 +1,10 @@
-# bot.py — Final Render HACK (Auto-Install Chromium + Flask)
+# bot.py — The Final Build (Cloudflare Bypass + Flask + Screenshot)
 import os
 import re
 import asyncio
 import logging
 import threading
 import subprocess
-import sys
 from pathlib import Path
 from flask import Flask
 from telegram import Update
@@ -73,7 +72,7 @@ async def got_number(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     SESSIONS[update.effective_user.id] = {"query": num, "type": input_type}
     
-    await update.message.reply_text("Browser khol raha hoon. Screenshot bhejunga, captcha solve karke batao.")
+    await update.message.reply_text("Browser khol raha hoon. Screenshot bhejunga, captcha solve karke batao v6.")
     asyncio.create_task(open_browser(update.effective_user.id, ctx))
     return SOLVE_CAPTCHA
 
@@ -82,7 +81,7 @@ async def open_browser(user_id: int, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         p_ctx = await async_playwright().start()
         
-        # Cloud flags
+        # Cloudflare Bypass Flags
         browser = await p_ctx.chromium.launch(
             headless=True,
             args=[
@@ -90,16 +89,23 @@ async def open_browser(user_id: int, ctx: ContextTypes.DEFAULT_TYPE):
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
-                "--single-process"
+                "--single-process",
+                "--disable-blink-features=AutomationControlled"
             ]
         )
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1366, "height": 768}
         )
+        
+        # Stealth Script to hide bot
+        await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         page = await context.new_page()
 
-        await page.goto("https://myaadhaar.uidai.gov.in", timeout=60000)
-        await asyncio.sleep(3)
+        log.info("Navigating to UIDAI...")
+        # Timeout badhaya, domcontentloaded use kiya
+        await page.goto("https://myaadhaar.uidai.gov.in", wait_until="domcontentloaded", timeout=90000)
+        await asyncio.sleep(5) 
 
         if sess["type"] == "mobile":
             try: await page.get_by_role("link", name=re.compile("Mobile", re.I)).first.click(timeout=5000)
@@ -114,7 +120,7 @@ async def open_browser(user_id: int, ctx: ContextTypes.DEFAULT_TYPE):
                 try: await page.fill(sel, sess["query"]); break
                 except: continue
 
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
         ss_path = OUT_DIR / f"captcha_{user_id}.png"
         await page.screenshot(path=str(ss_path))
 
@@ -223,7 +229,7 @@ async def cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 def main():
-    # 1. Start Flask server FIRST (Render ko port dikhane ke liye)
+    # 1. Flask Server
     def run_server():
         port = int(os.environ.get("PORT", 10000))
         web_app.run(host="0.0.0.0", port=port)
@@ -231,10 +237,9 @@ def main():
     threading.Thread(target=run_server, daemon=True).start()
     log.info("Flask dummy server started. Port is open.")
 
-    # 2. MAGIC HACK: Khud hi Chromium install karo
+    # 2. Auto Browser Install
     try:
         log.info("Checking Playwright browser installation...")
-        # Check if playwright command exists and install chromium
         result = subprocess.run(["playwright", "install", "chromium"], capture_output=True, text=True)
         if result.returncode == 0:
             log.info("Playwright Chromium successfully verified/installed!")
@@ -243,7 +248,7 @@ def main():
     except Exception as e:
         log.error(f"Could not run playwright install: {e}")
 
-    # 3. Start Telegram Bot
+    # 3. Telegram Bot
     bot_app = Application.builder().token(BOT_TOKEN).build()
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
